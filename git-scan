@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="${1:-}"
+if [[ -z "$root" || ! -d "$root" ]]; then
+    echo "Usage: git-scan <path>" >&2
+    exit 1
+fi
+
+printf "%-25s %-14s %-15s %-15s\n" "REPO" "STATUS" "SYNC" "BRANCH"
+printf '%.0s-' {1..75}; echo
+
+while IFS= read -r -d '' gitdir; do
+    repo="${gitdir%/.git}"
+    name="${repo#"$root"/}"
+    [[ "$name" == "$repo" ]] && name="$(basename "$repo")"
+    name="${name:0:25}"
+
+    branch=$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "?")
+
+    if [[ -z "$(git -C "$repo" status --porcelain 2>/dev/null)" ]]; then
+        status="✅ Clean"
+    else
+        status="⚠️  Pending"
+    fi
+
+    if git -C "$repo" rev-parse --abbrev-ref --symbolic-full-name '@{u}' &>/dev/null; then
+        counts=$(git -C "$repo" rev-list --left-right --count 'HEAD...@{u}' 2>/dev/null || echo "0 0")
+        ahead=$(echo "$counts" | awk '{print $1}')
+        behind=$(echo "$counts" | awk '{print $2}')
+        if [[ "$ahead" -eq 0 && "$behind" -eq 0 ]]; then
+            sync="Synced"
+        elif [[ "$ahead" -gt 0 && "$behind" -gt 0 ]]; then
+            sync="Diverged"
+        elif [[ "$ahead" -gt 0 ]]; then
+            sync="Ahead $ahead"
+        else
+            sync="Behind $behind"
+        fi
+    else
+        sync="No upstream"
+    fi
+
+    printf "%-25s %-14s %-15s %-15s\n" "$name" "$status" "$sync" "$branch"
+done < <(find "$root" -type d -name .git -print0 2>/dev/null)
